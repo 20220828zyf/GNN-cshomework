@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import argparse
+import time
 from gat_model import GAT
 from utils import load_data_pytorch
 
@@ -15,7 +16,7 @@ def accuracy(output, labels):
 
 def train(dataset='cora', learning_rate=0.005, epochs=1000, nhid=8, 
           dropout=0.6, weight_decay=5e-4, early_stopping=10, nheads=8, 
-          alpha=0.2, data_dir=None):
+          alpha=0.2, use_cpu=False, data_dir=None):
     """
     训练 GAT 模型
     
@@ -37,7 +38,11 @@ def train(dataset='cora', learning_rate=0.005, epochs=1000, nhid=8,
     )
 
     # 转为 torch.tensor
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if use_cpu:
+        device = torch.device("cpu")
+        print("Using CPU as requested (--use_cpu flag)")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 在移到设备之前，先计算类别数和验证标签
     # 计算类别数：使用唯一标签的数量
@@ -63,6 +68,15 @@ def train(dataset='cora', learning_rate=0.005, epochs=1000, nhid=8,
     idx_test = idx_test.to(device)
 
     # 定义模型
+    # 对于大图（如 pubmed），如果 GPU 内存不足，自动减少注意力头数量
+    if features.shape[0] > 10000:
+        if nheads > 2:
+            print(f"Warning: Large graph detected ({features.shape[0]} nodes). Reducing attention heads from {nheads} to 2 to save memory.")
+            nheads = 2
+        # 清理 GPU 缓存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
     model = GAT(
         nfeat=features.shape[1],
         nhid=nhid,
@@ -82,6 +96,7 @@ def train(dataset='cora', learning_rate=0.005, epochs=1000, nhid=8,
     print(f"Training on {device}")
 
     # ------- training -------
+    train_start_time = time.time()  # 记录训练开始时间
     best_val_acc = 0
     patience_counter = 0
     
@@ -120,6 +135,9 @@ def train(dataset='cora', learning_rate=0.005, epochs=1000, nhid=8,
             print("Early stopping...")
             break
 
+    train_end_time = time.time()  # 记录训练结束时间
+    train_time = train_end_time - train_start_time  # 计算总训练时间
+    print(f"Total training time: {train_time:.2f} seconds ({train_time/60:.2f} minutes)")
     print("Optimization Finished!")
 
     # ------- test -------
@@ -167,7 +185,9 @@ if __name__ == "__main__":
     parser.add_argument('--early_stopping', type=int, default=10,
                         help='Tolerance for early stopping (default: 10)')
     parser.add_argument('--nheads', type=int, default=8,
-                        help='Number of attention heads in first layer (default: 8)')
+                        help='Number of attention heads in first layer (default: 8, auto-reduced to 4 for large graphs)')
+    parser.add_argument('--use_cpu', action='store_true',
+                        help='Force using CPU instead of CUDA (useful for large graphs)')
     parser.add_argument('--alpha', type=float, default=0.2,
                         help='LeakyReLU negative slope (default: 0.2)')
     parser.add_argument('--data_dir', type=str, default=None,
@@ -185,6 +205,7 @@ if __name__ == "__main__":
         early_stopping=args.early_stopping,
         nheads=args.nheads,
         alpha=args.alpha,
+        use_cpu=args.use_cpu,
         data_dir=args.data_dir
     )
 

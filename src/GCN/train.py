@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 import argparse
+import time
 from gcn_model import GCN
 from utils import load_data_pytorch
 
@@ -76,6 +77,7 @@ def train(model='gcn', dataset='cora', learning_rate=0.01, epochs=500, hidden1=1
     print(f"Training on {device}")
 
     # ------- training -------
+    train_start_time = time.time()  # 记录训练开始时间
     best_val_acc = 0
     patience_counter = 0
     
@@ -118,7 +120,10 @@ def train(model='gcn', dataset='cora', learning_rate=0.01, epochs=500, hidden1=1
             print("Early stopping...")
             break
 
+    train_end_time = time.time()  # 记录训练结束时间
+    train_time = train_end_time - train_start_time  # 计算总训练时间
     print("Optimization Finished!")
+    print(f"Total training time: {train_time:.2f} seconds ({train_time/60:.2f} minutes)")
 
     # ------- test -------
     model_gcn.eval()

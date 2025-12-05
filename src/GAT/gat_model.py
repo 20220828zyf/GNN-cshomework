@@ -67,34 +67,42 @@ class GraphAttentionLayer(nn.Module):
         
         # 将 a 拆分为两部分：a_left 和 a_right
         a_left, a_right = self.a.split(self.out_features, 0)
+        # a_left: [out_features, 1]
+        # a_right: [out_features, 1]
         
         # 计算 a_left^T h_i 和 a_right^T h_j
         # h: [N, out_features]
-        # a_left: [out_features, 1] -> [1, out_features]
-        # a_right: [out_features, 1] -> [1, out_features]
-        attention_left = torch.matmul(h, a_left.t())  # [N, 1]
-        attention_right = torch.matmul(h, a_right.t())  # [N, 1]
+        # a_left: [out_features, 1]
+        # a_right: [out_features, 1]
+        attention_left = torch.matmul(h, a_left)  # [N, out_features] @ [out_features, 1] = [N, 1]
+        attention_right = torch.matmul(h, a_right)  # [N, out_features] @ [out_features, 1] = [N, 1]
         
         # 使用广播机制计算所有节点对的注意力分数
         # e_ij = a_left^T h_i + a_right^T h_j
-        e = attention_left + attention_right.t()  # [N, N]
+        # attention_left: [N, 1], attention_right: [N, 1]
+        # 广播: [N, 1] + [1, N] = [N, N]
+        e = attention_left + attention_right.t()  # [N, 1] + [1, N] = [N, N]
         
         # LeakyReLU 激活
         e = F.leaky_relu(e, negative_slope=self.alpha)
         
         # 应用邻接矩阵掩码：只保留有边的节点对的注意力
-        # 对于稀疏邻接矩阵，需要转换为密集矩阵
+        # 将没有边的节点对的注意力分数设为负无穷（softmax 后会变为 0）
         if adj.is_sparse:
             adj_dense = adj.to_dense()
         else:
             adj_dense = adj
         
-        # 将没有边的节点对的注意力分数设为负无穷（softmax 后会变为 0）
-        zero_vec = -9e15 * torch.ones_like(e)
-        attention = torch.where(adj_dense > 0, e, zero_vec)
+        # 直接修改 e 而不是创建副本（节省内存）
+        e[adj_dense == 0] = -9e15
         
         # Softmax 归一化：α_ij = softmax_j(e_ij)
-        attention = F.softmax(attention, dim=1)
+        attention = F.softmax(e, dim=1)
+        
+        # 释放中间变量以节省内存
+        if adj.is_sparse:
+            del adj_dense
+        del e
         
         # Dropout
         attention = F.dropout(attention, self.dropout, training=self.training)
